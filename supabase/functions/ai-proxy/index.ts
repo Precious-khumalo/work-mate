@@ -25,7 +25,7 @@ async function callOpenAI(messages: ChatCompletionMessage[], jsonMode: boolean):
   const body: Record<string, unknown> = {
     model: MODEL,
     messages,
-    temperature: 0.7,
+    temperature: 0.5,
     max_tokens: 2000,
   };
 
@@ -57,26 +57,56 @@ async function callOpenAI(messages: ChatCompletionMessage[], jsonMode: boolean):
 
 // ---------- Feature 1: Email Generator ----------
 
-const EMAIL_SYSTEM_PROMPT = `You are a professional workplace communication assistant.
+const EMAIL_SYSTEM_PROMPT = `You are an expert professional workplace communication assistant and editor.
 
-Your task is to generate professional workplace emails using ONLY the information provided by the user.
+Write emails that sound natural, polished and grammatically correct.
+Never copy the user's wording if it contains grammatical errors. Rewrite it naturally while preserving the user's intended meaning.
 
-Requirements:
+Before returning the email, silently check:
+1. Grammar
+2. Spelling
+3. Sentence structure
+4. Professional tone
+5. Clarity
+6. Whether the email directly addresses the user's purpose
+
+Do not invent facts, dates, names, commitments or other information.
+
+The email should contain:
+- A concise subject line
+- Appropriate greeting
+- Clear opening sentence explaining the purpose
+- Relevant details provided by the user
+- A polite closing/request for a response where appropriate
+- Professional sign-off
+
+For example, if the user says:
+Purpose: Request annual leave
+Important information: I need Friday off for a personal appointment.
+
+A suitable result would be:
+Subject: Annual Leave Request for Friday
+Dear Manager,
+I would like to request annual leave for Friday, as I have a personal appointment.
+Please let me know if you require any additional information or documentation.
+Kind regards,
+[Name]
+
+Do not automatically add information that the user did not provide.
+Keep the user's intended meaning unchanged.
+
+Additional requirements:
 - Adapt the tone to the selected tone.
 - Adapt the communication to the intended audience.
-- Do not invent names, dates, facts, commitments or information.
 - If essential information is missing, clearly identify what information is needed.
-- Generate an appropriate subject line.
-- Generate a professional greeting.
-- Generate a clear and concise email body.
-- Generate an appropriate professional closing.
 - Keep the email practical and ready for human review.
+- Use natural, grammatically correct sentences at all times. Never produce awkward or ungrammatical phrasing such as "regarding request annual leave" — always rewrite the user's purpose into a proper sentence like "regarding my annual leave request".
 
 You MUST respond in JSON format with the following structure:
 {
   "subject": "The email subject line",
   "greeting": "The greeting line (e.g., Dear John,)",
-  "body": "The main email body text",
+  "body": "The main email body text — must be grammatically correct and natural",
   "closing": "The professional closing (e.g., Best regards,)"
 }
 
@@ -209,7 +239,10 @@ Important Information: ${payload.details || "(not provided)"}
 Tone: ${payload.tone || "Professional"}
 Additional Instructions: ${payload.additionalInstructions || "(none provided)"}
 
-Remember: Use ONLY the information provided above. Do not invent facts, dates, names, or commitments.`;
+Remember:
+- Use ONLY the information provided above. Do not invent facts, dates, names, or commitments.
+- Rewrite the user's purpose and details into natural, grammatically correct sentences. Never copy awkward or ungrammatical phrasing verbatim.
+- The email must read as if written by a fluent professional.`;
         messages = [
           { role: "system", content: systemPrompt },
           { role: "user", content: userMessage },
