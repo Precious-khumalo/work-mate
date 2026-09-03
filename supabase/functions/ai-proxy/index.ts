@@ -25,7 +25,7 @@ async function callOpenAI(messages: ChatCompletionMessage[], jsonMode: boolean):
   const body: Record<string, unknown> = {
     model: MODEL,
     messages,
-    temperature: 0.5,
+    temperature: 0.4,
     max_tokens: 2000,
   };
 
@@ -55,64 +55,103 @@ async function callOpenAI(messages: ChatCompletionMessage[], jsonMode: boolean):
   return content;
 }
 
-// ---------- Feature 1: Email Generator ----------
+// ---------- Post-processing: mechanical fixes the AI sometimes misses ----------
 
-const EMAIL_SYSTEM_PROMPT = `You are an expert professional workplace communication assistant and editor.
+function postProcessEmail(email: Record<string, unknown>): Record<string, unknown> {
+  const fields = ["subject", "greeting", "body", "closing"];
+  for (const field of fields) {
+    if (typeof email[field] !== "string") continue;
+    let text = email[field] as string;
 
-Write emails that sound natural, polished and grammatically correct.
-Never copy the user's wording if it contains grammatical errors. Rewrite it naturally while preserving the user's intended meaning.
+    // Fix lowercase "i" when used as a standalone pronoun
+    text = text.replace(/\bi\b/g, "I");
+    // Fix "i'm", "i've", "i'll", "i'd" at start or mid-sentence
+    text = text.replace(/\bi'/g, "I'");
+    // Capitalize first letter of each sentence in the body
+    if (field === "body") {
+      text = text.replace(/(^|\.\s+|\n\s*)([a-z])/g, (_match, prefix: string, letter: string) =>
+        prefix + letter.toUpperCase()
+      );
+    }
+    // Capitalize first letter of subject and greeting
+    if (field === "subject" || field === "greeting") {
+      text = text.replace(/^\s*([a-z])/, (_m, letter: string) => letter.toUpperCase());
+    }
+    // Collapse multiple blank lines into one
+    text = text.replace(/\n{3,}/g, "\n\n");
+    // Trim trailing whitespace per line
+    text = text
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .join("\n");
 
-Before returning the email, silently check:
-1. Grammar
-2. Spelling
-3. Sentence structure
-4. Professional tone
-5. Clarity
-6. Whether the email directly addresses the user's purpose
+    email[field] = text;
+  }
+  return email;
+}
 
-Do not invent facts, dates, names, commitments or other information.
+// ---------- Feature 1: Email Generator (two-pass: draft + edit) ----------
+
+const EMAIL_DRAFT_PROMPT = `You are an expert professional workplace communication assistant.
+
+Write a professional workplace email using ONLY the information provided by the user.
+
+Rules:
+- Rewrite the user's purpose and details into natural, grammatically correct English. Never copy the user's wording verbatim if it is awkward or ungrammatical.
+- Do NOT produce phrases like "I am writing to you regarding requesting leave." Instead write natural English such as "I would like to request leave for Friday."
+- Do NOT repeat the email's purpose in multiple sentences. State it once clearly in the opening, then move to details.
+- Do not invent facts, dates, names, commitments, or reasons the user did not provide.
+- Adapt the tone to the selected tone and the communication to the intended audience.
+- The email must read as if written by a fluent professional.
 
 The email should contain:
 - A concise subject line
-- Appropriate greeting
-- Clear opening sentence explaining the purpose
-- Relevant details provided by the user
-- A polite closing/request for a response where appropriate
-- Professional sign-off
+- An appropriate greeting
+- A clear, natural opening sentence that states the purpose
+- The relevant details provided by the user, expressed in proper sentences
+- A polite closing or request for a response where appropriate
+- A professional sign-off
 
-For example, if the user says:
-Purpose: Request annual leave
-Important information: I need Friday off for a personal appointment.
-
-A suitable result would be:
-Subject: Annual Leave Request for Friday
-Dear Manager,
-I would like to request annual leave for Friday, as I have a personal appointment.
-Please let me know if you require any additional information or documentation.
-Kind regards,
-[Name]
-
-Do not automatically add information that the user did not provide.
-Keep the user's intended meaning unchanged.
-
-Additional requirements:
-- Adapt the tone to the selected tone.
-- Adapt the communication to the intended audience.
-- If essential information is missing, clearly identify what information is needed.
-- Keep the email practical and ready for human review.
-- Use natural, grammatically correct sentences at all times. Never produce awkward or ungrammatical phrasing such as "regarding request annual leave" — always rewrite the user's purpose into a proper sentence like "regarding my annual leave request".
-
-You MUST respond in JSON format with the following structure:
+Respond in JSON:
 {
-  "subject": "The email subject line",
-  "greeting": "The greeting line (e.g., Dear John,)",
-  "body": "The main email body text — must be grammatically correct and natural",
-  "closing": "The professional closing (e.g., Best regards,)"
+  "subject": "...",
+  "greeting": "...",
+  "body": "...",
+  "closing": "..."
 }
 
-If essential information is missing and you cannot generate a meaningful email, respond with:
+If essential information is missing, respond with:
+{"clarificationNeeded": "..."}
+
+Do not include any text outside the JSON object.`;
+
+const EMAIL_EDIT_PROMPT = `You are a meticulous professional email editor.
+
+You will receive a draft email in JSON format. Your job is to perform a mandatory final quality check and return a polished version.
+
+Silently check and fix ALL of the following:
+1. Grammar — every sentence must be grammatically correct
+2. Spelling — no spelling errors
+3. Capitalization — the pronoun "I" must always be capitalized; sentences must start with a capital letter; proper nouns must be capitalized
+4. Natural sentence structure — rewrite any awkward or unnatural phrasing into fluent professional English. For example, "I am writing to you regarding requesting leave" must become "I would like to request leave."
+5. Professional tone — the language must be polished and workplace-appropriate
+6. Repetition — remove any sentences that unnecessarily repeat the purpose or duplicate information
+7. Clarity — the email must be easy to read and understand
+8. Purpose alignment — the email must directly address the user's stated purpose
+
+Critical rules:
+- Do NOT change the user's intended meaning.
+- Do NOT add information that was not in the draft (no new facts, dates, names, reasons, or commitments).
+- Do NOT remove information from the draft unless it is a duplicated/redundant statement.
+- If the draft is already good, return it unchanged.
+- Preserve the JSON structure exactly.
+
+Return the edited email in the same JSON format:
 {
-  "clarificationNeeded": "Explanation of what information is missing"
+  "subject": "...",
+  "greeting": "...",
+  "body": "...",
+  "closing": "..."
 }
 
 Do not include any text outside the JSON object.`;
@@ -137,8 +176,8 @@ Keep the summary concise, accurate and easy to scan.
 You MUST respond in JSON format with the following structure:
 {
   "summary": "A short summary of the meeting",
-  "keyPoints": ["Point 1", "Point 2", ...],
-  "decisions": ["Decision 1", "Decision 2", ...],
+  "keyPoints": ["Point 1", "Point 2"],
+  "decisions": ["Decision 1", "Decision 2"],
   "actionItems": [
     {"task": "Description of the task", "responsible": "Person name or Not specified", "deadline": "Date or Not specified"}
   ],
@@ -146,9 +185,7 @@ You MUST respond in JSON format with the following structure:
 }
 
 If the meeting notes are too short or empty to summarize, respond with:
-{
-  "clarificationNeeded": "Explanation of what is needed"
-}
+{"clarificationNeeded": "Explanation of what is needed"}
 
 Do not include any text outside the JSON object.`;
 
@@ -177,16 +214,14 @@ Return:
 You MUST respond in JSON format with the following structure:
 {
   "highPriority": [{"id": "task id from input", "name": "task name", "deadline": "deadline", "priority": "High", "estimatedTime": "estimated time", "reason": "brief reason for prioritization"}],
-  "mediumPriority": [same structure],
-  "lowPriority": [same structure],
+  "mediumPriority": [{"id": "...", "name": "...", "deadline": "...", "priority": "Medium", "estimatedTime": "...", "reason": "..."}],
+  "lowPriority": [{"id": "...", "name": "...", "deadline": "...", "priority": "Low", "estimatedTime": "...", "reason": "..."}],
   "schedule": [{"time": "09:00 AM - 10:00 AM", "taskName": "task name", "priority": "High"}],
-  "tips": ["Productivity tip 1", "Productivity tip 2", ...]
+  "tips": ["Productivity tip 1", "Productivity tip 2"]
 }
 
 If no valid tasks are provided, respond with:
-{
-  "clarificationNeeded": "Explanation of what is needed"
-}
+{"clarificationNeeded": "Explanation of what is needed"}
 
 Do not include any text outside the JSON object.`;
 
@@ -223,15 +258,9 @@ Deno.serve(async (req: Request) => {
   try {
     const { feature, payload, history } = await req.json();
 
-    let systemPrompt = "";
-    let userMessage = "";
-    let jsonMode = true;
-    let messages: ChatCompletionMessage[] = [];
-
-    switch (feature) {
-      case "email": {
-        systemPrompt = EMAIL_SYSTEM_PROMPT;
-        userMessage = `Generate a professional email with the following details:
+    // ----- Email: two-pass generation (draft + edit) -----
+    if (feature === "email") {
+      const draftUserMessage = `Generate a professional email with the following details:
 
 Recipient/Audience: ${payload.recipient || "(not provided)"}
 Email Purpose: ${payload.purpose || "(not provided)"}
@@ -239,17 +268,76 @@ Important Information: ${payload.details || "(not provided)"}
 Tone: ${payload.tone || "Professional"}
 Additional Instructions: ${payload.additionalInstructions || "(none provided)"}
 
-Remember:
+Rules:
 - Use ONLY the information provided above. Do not invent facts, dates, names, or commitments.
-- Rewrite the user's purpose and details into natural, grammatically correct sentences. Never copy awkward or ungrammatical phrasing verbatim.
+- Rewrite the user's purpose and details into natural, grammatically correct sentences.
+- Do NOT produce awkward phrasing like "regarding requesting leave." Write natural English instead.
+- Do NOT repeat the purpose multiple times. State it once, then cover the details.
 - The email must read as if written by a fluent professional.`;
-        messages = [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
-        ];
-        break;
+
+      const draftMessages: ChatCompletionMessage[] = [
+        { role: "system", content: EMAIL_DRAFT_PROMPT },
+        { role: "user", content: draftUserMessage },
+      ];
+
+      const draftRaw = await callOpenAI(draftMessages, true);
+
+      let draftParsed: Record<string, unknown>;
+      try {
+        draftParsed = JSON.parse(draftRaw);
+      } catch {
+        return new Response(
+          JSON.stringify({ error: "The AI returned an invalid response format. Please try again." }),
+          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
 
+      // If the draft asked for clarification, return it immediately — no editing needed.
+      if (draftParsed.clarificationNeeded) {
+        return new Response(
+          JSON.stringify({ data: draftParsed }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Second pass: mandatory editing step
+      const editUserMessage = `Here is the draft email to review and polish. Perform the mandatory final quality check and return the corrected version.
+
+Draft:
+${JSON.stringify(draftParsed, null, 2)}
+
+Remember: fix grammar, spelling, capitalization, natural sentence structure, professional tone, repetition, and clarity. Do not change the meaning. Do not add new information. Return the same JSON structure.`;
+
+      const editMessages: ChatCompletionMessage[] = [
+        { role: "system", content: EMAIL_EDIT_PROMPT },
+        { role: "user", content: editUserMessage },
+      ];
+
+      let finalEmail: Record<string, unknown>;
+      try {
+        const editedRaw = await callOpenAI(editMessages, true);
+        finalEmail = JSON.parse(editedRaw);
+      } catch {
+        // If the editing pass fails, use the draft with post-processing
+        finalEmail = draftParsed;
+      }
+
+      // Always run mechanical post-processing as a safety net
+      finalEmail = postProcessEmail(finalEmail);
+
+      return new Response(
+        JSON.stringify({ data: finalEmail }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ----- Other features: single-pass -----
+    let systemPrompt = "";
+    let userMessage = "";
+    let jsonMode = true;
+    let messages: ChatCompletionMessage[] = [];
+
+    switch (feature) {
       case "meeting": {
         systemPrompt = MEETING_SYSTEM_PROMPT;
         userMessage = `Summarize the following meeting notes:
@@ -270,8 +358,8 @@ Remember: Do not invent information. If a responsible person or deadline is not 
 
       case "planner": {
         systemPrompt = PLANNER_SYSTEM_PROMPT;
-        const taskList = payload.tasks
-          .map((t: Record<string, string>, i: number) => `Task ${i + 1} (id: ${t.id}):
+        const taskList = (payload.tasks as Record<string, string>[])
+          .map((t, i: number) => `Task ${i + 1} (id: ${t.id}):
   - Name: ${t.name || "(not provided)"}
   - Deadline: ${t.deadline || "(not provided)"}
   - Priority: ${t.priority || "Medium"}
