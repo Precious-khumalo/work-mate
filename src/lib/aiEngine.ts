@@ -120,20 +120,13 @@ async function callAI<T>(feature: string, payload: Record<string, unknown>, hist
 // ---------------------------------------------------------------------------
 
 export async function generateEmail(input: EmailInput): Promise<GeneratedEmail> {
-  try {
-    return await callAI<GeneratedEmail>('email', {
-      recipient: input.recipient,
-      purpose: input.purpose,
-      details: input.details,
-      tone: input.tone,
-      additionalInstructions: input.additionalInstructions,
-    });
-  } catch (err) {
-    if (isMissingKeyError(err)) {
-      return mockGenerateEmail(input);
-    }
-    throw err;
-  }
+  return callAI<GeneratedEmail>('email', {
+    recipient: input.recipient,
+    purpose: input.purpose,
+    details: input.details,
+    tone: input.tone,
+    additionalInstructions: input.additionalInstructions,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -195,64 +188,6 @@ function isMissingKeyError(err: unknown): boolean {
 // ---------------------------------------------------------------------------
 // Mock fallbacks — used when OPENAI_API_KEY is not yet set as a Supabase secret
 // ---------------------------------------------------------------------------
-
-function mockGenerateEmail(input: EmailInput): GeneratedEmail {
-  if (!input.recipient.trim()) {
-    return {
-      subject: '',
-      greeting: '',
-      body: '',
-      closing: '',
-      clarificationNeeded:
-        "Could you please specify who the email is for? For example: 'my manager', 'the entire team', or 'a new client'.",
-    };
-  }
-  if (!input.purpose.trim()) {
-    return {
-      subject: '',
-      greeting: '',
-      body: '',
-      closing: '',
-      clarificationNeeded: 'Could you please describe the purpose of this email?',
-    };
-  }
-  if (!input.details.trim()) {
-    return {
-      subject: '',
-      greeting: '',
-      body: '',
-      closing: '',
-      clarificationNeeded: 'Could you provide important information to include in the email?',
-    };
-  }
-
-  const purpose = input.purpose.trim();
-  const recipient = input.recipient.trim();
-  const details = input.details.trim();
-
-  const capitalizedPurpose = purpose.charAt(0).toUpperCase() + purpose.slice(1);
-  const subject = capitalizedPurpose;
-
-  const recipientName = recipient.charAt(0).toUpperCase() + recipient.slice(1);
-
-  const bodyLines: string[] = [];
-  bodyLines.push(`I would like to ${purpose}.`);
-  bodyLines.push('');
-  bodyLines.push(details.charAt(0).toUpperCase() + details.slice(1));
-  if (input.additionalInstructions.trim()) {
-    bodyLines.push('');
-    bodyLines.push(input.additionalInstructions.trim());
-  }
-  bodyLines.push('');
-  bodyLines.push('Please let me know if you need any additional information.');
-
-  return {
-    subject,
-    greeting: `Dear ${recipientName},`,
-    body: bodyLines.join('\n'),
-    closing: 'Best regards,',
-  };
-}
 
 function mockSummarizeMeeting(input: MeetingInput): MeetingSummary {
   if (!input.notes.trim() || input.notes.trim().length < 20) {

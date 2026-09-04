@@ -19,7 +19,7 @@ interface ChatCompletionMessage {
 
 async function callOpenAI(messages: ChatCompletionMessage[], jsonMode: boolean): Promise<string> {
   if (!OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is not configured. Add it as a secret in Supabase Edge Functions > Secrets.");
+    throw new Error("The AI service is not yet configured. An administrator needs to add the OpenAI API key to the project's edge function secrets before email generation can work.");
   }
 
   const body: Record<string, unknown> = {
