@@ -227,18 +227,29 @@ function mockGenerateEmail(input: EmailInput): GeneratedEmail {
   }
 
   const purpose = input.purpose.trim();
-  const subject = purpose.charAt(0).toUpperCase() + purpose.slice(1);
+  const recipient = input.recipient.trim();
+  const details = input.details.trim();
 
-  let body = `I am writing to you regarding ${purpose}.\n\n${input.details.trim()}`;
+  const capitalizedPurpose = purpose.charAt(0).toUpperCase() + purpose.slice(1);
+  const subject = capitalizedPurpose;
+
+  const recipientName = recipient.charAt(0).toUpperCase() + recipient.slice(1);
+
+  const bodyLines: string[] = [];
+  bodyLines.push(`I would like to ${purpose}.`);
+  bodyLines.push('');
+  bodyLines.push(details.charAt(0).toUpperCase() + details.slice(1));
   if (input.additionalInstructions.trim()) {
-    body += `\n\n${input.additionalInstructions.trim()}`;
+    bodyLines.push('');
+    bodyLines.push(input.additionalInstructions.trim());
   }
-  body += '\n\nPlease let me know if you need any additional information.';
+  bodyLines.push('');
+  bodyLines.push('Please let me know if you need any additional information.');
 
   return {
     subject,
-    greeting: `Dear ${input.recipient.trim()},`,
-    body,
+    greeting: `Dear ${recipientName},`,
+    body: bodyLines.join('\n'),
     closing: 'Best regards,',
   };
 }
