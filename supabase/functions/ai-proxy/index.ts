@@ -1,5 +1,5 @@
 // WorkMate AI — Edge Function
-// Securely proxies AI requests to OpenAI, keeping the API key server-side.
+// Securely proxies AI requests to OpenRouter, keeping the API key server-side.
 // Supports 4 features: email, meeting, planner, chat.
 
 const corsHeaders = {
@@ -8,18 +8,20 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-const MODEL = "gpt-4o-mini";
+const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const MODEL = "openrouter/free";
 
 interface ChatCompletionMessage {
   role: "system" | "user" | "assistant";
   content: string;
 }
 
-async function callOpenAI(messages: ChatCompletionMessage[], jsonMode: boolean): Promise<string> {
-  if (!OPENAI_API_KEY) {
-    throw new Error("The AI service is not yet configured. An administrator needs to add the OpenAI API key to the project's edge function secrets before email generation can work.");
+// ---------- OpenRouter call with detailed error handling ----------
+
+async function callOpenRouter(messages: ChatCompletionMessage[], jsonMode: boolean): Promise<string> {
+  if (!OPENROUTER_API_KEY) {
+    throw new Error("The AI service is not yet configured. An administrator needs to add the OpenRouter API key (OPENROUTER_API_KEY) to the project's edge function secrets before AI features can work.");
   }
 
   const body: Record<string, unknown> = {
@@ -33,24 +35,64 @@ async function callOpenAI(messages: ChatCompletionMessage[], jsonMode: boolean):
     body.response_format = { type: "json_object" };
   }
 
-  const response = await fetch(OPENAI_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`OpenAI API error (${response.status}): ${errorText}`);
+  let response: Response;
+  try {
+    response = await fetch(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        "HTTP-Referer": "https://workmate-ai.app",
+        "X-Title": "WorkMate AI",
+      },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error("Unable to reach the AI service. Please check your network connection and try again.");
   }
 
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
+  if (!response.ok) {
+    const status = response.status;
+    let errorDetail = "";
+    try {
+      const errorData = await response.json();
+      errorDetail = errorData?.error?.message || errorData?.error || errorData?.message || "";
+    } catch {
+      errorDetail = await response.text().catch(() => "");
+    }
+
+    if (status === 401) {
+      throw new Error("The OpenRouter API key is invalid or unauthorized. Please verify the OPENROUTER_API_KEY secret is correct.");
+    }
+    if (status === 402) {
+      throw new Error("The OpenRouter account has insufficient credits. Please add credits to your OpenRouter account.");
+    }
+    if (status === 403) {
+      throw new Error("Access denied by OpenRouter. The API key may not have permission to use the requested model.");
+    }
+    if (status === 404) {
+      throw new Error("The requested AI model is not available on OpenRouter. Please try again later or contact support.");
+    }
+    if (status === 429) {
+      throw new Error("The AI service rate limit has been reached. Please wait a moment and try again.");
+    }
+    if (status >= 500) {
+      throw new Error("The AI service is experiencing issues. Please try again in a moment.");
+    }
+    throw new Error(`The AI service returned an error (status ${status}): ${errorDetail || "Unknown error"}`);
+  }
+
+  let data: Record<string, unknown>;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("The AI service returned an invalid response. Please try again.");
+  }
+
+  const choices = data?.choices as Array<{ message?: { content?: string } }> | undefined;
+  const content = choices?.[0]?.message?.content;
   if (!content) {
-    throw new Error("OpenAI returned an empty response.");
+    throw new Error("The AI service returned an empty response. Please try again.");
   }
   return content;
 }
@@ -347,7 +389,7 @@ async function generateEmailThreePass(payload: EmailPayload): Promise<Response> 
     { role: "user", content: userMsg },
   ];
 
-  const draftRaw = await callOpenAI(draftMessages, true);
+  const draftRaw = await callOpenRouter(draftMessages, true);
   const draftParsed = safeParseJSON(draftRaw);
 
   if (!draftParsed) {
@@ -381,7 +423,7 @@ Perform the mandatory final editing pass. Fix grammar, spelling, capitalization,
 
   let editedParsed: Record<string, unknown>;
   try {
-    const editedRaw = await callOpenAI(editMessages, true);
+    const editedRaw = await callOpenRouter(editMessages, true);
     const parsed = safeParseJSON(editedRaw);
     if (parsed && !parsed.clarificationNeeded) {
       editedParsed = parsed;
@@ -405,7 +447,7 @@ ${JSON.stringify(editedParsed, null, 2)}`;
 
   let finalEmail: Record<string, unknown>;
   try {
-    const verifiedRaw = await callOpenAI(verifyMessages, true);
+    const verifiedRaw = await callOpenRouter(verifyMessages, true);
     const parsed = safeParseJSON(verifiedRaw);
     if (parsed && !parsed.clarificationNeeded) {
       finalEmail = parsed;
@@ -508,7 +550,7 @@ Remember: Do not change user-provided deadlines. Do not invent information. Brie
         );
     }
 
-    const aiResponse = await callOpenAI(messages, jsonMode);
+    const aiResponse = await callOpenRouter(messages, jsonMode);
 
     if (jsonMode) {
       const parsed = safeParseJSON(aiResponse);

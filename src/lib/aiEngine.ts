@@ -65,8 +65,9 @@ export interface ChatMessage {
 }
 
 // ---------------------------------------------------------------------------
-// AI Proxy — calls the Supabase Edge Function which securely reaches OpenAI.
-// Falls back to mock responses if the API key is not configured.
+// AI Proxy — calls the Supabase Edge Function which securely reaches OpenRouter.
+// The API key is never exposed to the browser; it stays server-side in the edge
+// function. Falls back to mock responses if the API key is not configured.
 // ---------------------------------------------------------------------------
 
 const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-proxy`;
@@ -182,11 +183,11 @@ export async function chatResponse(message: string, history: ChatMessage[]): Pro
 function isMissingKeyError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const msg = err.message.toLowerCase();
-  return msg.includes('openai_api_key') || msg.includes('not configured') || msg.includes('api key');
+  return msg.includes('openrouter') || msg.includes('not configured') || msg.includes('api key') || msg.includes('invalid or unauthorized');
 }
 
 // ---------------------------------------------------------------------------
-// Mock fallbacks — used when OPENAI_API_KEY is not yet set as a Supabase secret
+// Mock fallbacks — used when OPENROUTER_API_KEY is not yet set as a secret
 // ---------------------------------------------------------------------------
 
 function mockSummarizeMeeting(input: MeetingInput): MeetingSummary {
